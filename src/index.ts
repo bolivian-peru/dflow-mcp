@@ -110,7 +110,7 @@ class DFlowAPIClient {
 }
 
 class BaoziAPIClient {
-  private baseUrl: string;
+  readonly baseUrl: string;
   private timeout: number;
 
   constructor(baseUrl: string = BAOZI_BASE_URL, timeout: number = DEFAULT_TIMEOUT) {
@@ -1729,7 +1729,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const cardParams: Record<string, any> = { market: toolArgs.market };
         if (toolArgs.wallet) cardParams.wallet = toolArgs.wallet;
         if (toolArgs.ref) cardParams.ref = toolArgs.ref;
-        const cardUrl = new URL('https://baozi.bet/api/share/card');
+        const cardUrl = new URL(`${baoziClient.baseUrl}/api/share/card`);
         Object.entries(cardParams).forEach(([k, v]) => cardUrl.searchParams.set(k, v));
         result = {
           imageUrl: cardUrl.toString(),

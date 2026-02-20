@@ -1,6 +1,6 @@
 {
   "name": "@openSVM/dflow-mcp",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "MCP Server for Prediction Markets — 35 tools across DFlow/Kalshi (CeFi) and Baozi.bet (DeFi/Solana) for events, markets, trades, odds, oracle proofs, and cross-platform analysis",
   "type": "module",
   "module": "src/index.ts",
