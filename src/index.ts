@@ -1,9 +1,12 @@
 #!/usr/bin/env bun
 /**
- * MCP Server for Prediction Market Metadata API
+ * MCP Server for Prediction Markets — DFlow (Kalshi) + Baozi (Solana)
  *
- * This server implements a Model Context Protocol (MCP) interface to the
- * Prediction Market Metadata API defined in llms_dflow.json.
+ * Multi-platform prediction market MCP server combining:
+ * - DFlow/Kalshi: CFTC-regulated centralized exchange (23 tools)
+ * - Baozi.bet: Decentralized pari-mutuel markets on Solana (12 tools)
+ *
+ * 35 total tools for comprehensive prediction market coverage.
  */
 
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
@@ -27,8 +30,11 @@ import { z } from 'zod';
  */
 export const configSchema = z.object({
   apiUrl: z.string()
-    .describe('Base URL for the Prediction Market Metadata API')
+    .describe('Base URL for the DFlow Prediction Market API')
     .default('https://prediction-markets-api.dflow.net'),
+  baoziApiUrl: z.string()
+    .describe('Base URL for the Baozi.bet Solana prediction market API')
+    .default('https://baozi.bet'),
   requestTimeout: z.number()
     .describe('Timeout for API requests in milliseconds')
     .default(30000),
@@ -36,6 +42,7 @@ export const configSchema = z.object({
 
 // API Configuration
 const BASE_URL = 'https://prediction-markets-api.dflow.net';
+const BAOZI_BASE_URL = 'https://baozi.bet';
 const DEFAULT_TIMEOUT = 30000; // 30 seconds
 
 class DFlowAPIClient {
@@ -102,9 +109,64 @@ class DFlowAPIClient {
   }
 }
 
+class BaoziAPIClient {
+  private baseUrl: string;
+  private timeout: number;
+
+  constructor(baseUrl: string = BAOZI_BASE_URL, timeout: number = DEFAULT_TIMEOUT) {
+    this.baseUrl = baseUrl.replace(/\/$/, '');
+    this.timeout = timeout;
+  }
+
+  private makeUrl(path: string): string {
+    return `${this.baseUrl}${path.startsWith('/') ? path : '/' + path}`;
+  }
+
+  async get(path: string, params?: Record<string, any>): Promise<any> {
+    const url = new URL(this.makeUrl(path));
+    if (params) {
+      Object.entries(params).forEach(([key, value]) => {
+        if (value !== undefined && value !== null) {
+          url.searchParams.append(key, String(value));
+        }
+      });
+    }
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), this.timeout);
+
+    try {
+      const response = await fetch(url.toString(), {
+        method: 'GET',
+        headers: { 'Accept': 'application/json, text/markdown, text/plain' },
+        signal: controller.signal,
+      });
+
+      clearTimeout(timeoutId);
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${await response.text()}`);
+      }
+
+      const contentType = response.headers.get('content-type') || '';
+      if (contentType.includes('application/json')) {
+        return await response.json();
+      }
+      return { content: await response.text(), contentType };
+    } catch (error) {
+      clearTimeout(timeoutId);
+      if (error instanceof Error && error.name === 'AbortError') {
+        throw new Error('Request timeout');
+      }
+      throw error;
+    }
+  }
+}
+
 // Configuration schema for Smithery
 interface ServerConfig {
   apiUrl?: string;
+  baoziApiUrl?: string;
   requestTimeout?: number;
 }
 
@@ -114,11 +176,15 @@ function createServer(config?: ServerConfig) {
     config?.apiUrl || BASE_URL,
     config?.requestTimeout || DEFAULT_TIMEOUT
   );
+  const baoziClient = new BaoziAPIClient(
+    config?.baoziApiUrl || BAOZI_BASE_URL,
+    config?.requestTimeout || DEFAULT_TIMEOUT
+  );
 
   const server = new Server(
     {
       name: 'dflow-mcp-server',
-      version: '1.0.0',
+      version: '1.1.0',
     },
     {
       capabilities: {
@@ -907,6 +973,300 @@ const TOOLS: Tool[] = [
       destructiveHint: false,
     },
   },
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Baozi.bet — Decentralized Prediction Markets on Solana
+  // https://baozi.bet | Program: FWyTPzm5cfJwRKzfkscxozatSxF6Qu78JQovQUwKPruJ
+  // Pari-mutuel pools • SOL-native • AI agent-friendly • 69 MCP tools
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  {
+    name: 'baozi_get_markets',
+    title: 'Baozi: List Markets',
+    description: 'Get active prediction markets from Baozi.bet on Solana. Returns binary (Yes/No) and race (multi-outcome) pari-mutuel markets with live pool sizes, odds, and closing times. Markets are settled in SOL with on-chain oracle resolution.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        status: {
+          type: 'string',
+          enum: ['Active', 'Closed', 'Resolved', 'Cancelled', 'Paused'],
+          description: 'Filter by market status (default: Active)',
+        },
+        limit: {
+          type: 'integer',
+          minimum: 1,
+          maximum: 100,
+          description: 'Number of markets to return (default: 50, max: 100)',
+        },
+        offset: {
+          type: 'integer',
+          minimum: 0,
+          description: 'Pagination offset',
+        },
+      },
+      required: [],
+    },
+    annotations: {
+      title: 'Baozi: List Markets',
+      readOnlyHint: true,
+      idempotentHint: true,
+      openWorldHint: true,
+      destructiveHint: false,
+    },
+  },
+  {
+    name: 'baozi_get_market',
+    title: 'Baozi: Get Market Details',
+    description: 'Get detailed information about a specific Baozi.bet prediction market by its Solana public key. Returns question, pool sizes, odds percentages, status, closing time, fees, and outcome labels.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        publicKey: {
+          type: 'string',
+          description: 'Solana public key (base58) of the market account',
+        },
+      },
+      required: ['publicKey'],
+    },
+    annotations: {
+      title: 'Baozi: Get Market Details',
+      readOnlyHint: true,
+      idempotentHint: true,
+      openWorldHint: true,
+      destructiveHint: false,
+    },
+  },
+  {
+    name: 'baozi_get_agent_markets',
+    title: 'Baozi: Agent-Optimized Market List',
+    description: 'Get markets optimized for AI agent consumption from Baozi.bet. Supports filtering by betting status to only show markets currently accepting bets. Returns simplified market data ideal for automated trading strategies.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        status: {
+          type: 'string',
+          enum: ['Active', 'Closed', 'Resolved', 'Cancelled', 'Paused'],
+          description: 'Filter by market status (default: Active)',
+        },
+        betting_open: {
+          type: 'boolean',
+          description: 'Only return markets currently accepting bets (default: false)',
+        },
+        limit: {
+          type: 'integer',
+          minimum: 1,
+          maximum: 100,
+          description: 'Number of markets to return (default: 50)',
+        },
+      },
+      required: [],
+    },
+    annotations: {
+      title: 'Baozi: Agent-Optimized Market List',
+      readOnlyHint: true,
+      idempotentHint: true,
+      openWorldHint: true,
+      destructiveHint: false,
+    },
+  },
+  {
+    name: 'baozi_get_quote',
+    title: 'Baozi: Get Bet Quote',
+    description: 'Calculate the expected payout for a potential bet on a Baozi.bet market BEFORE placing it. Returns expected payout in SOL, potential profit, implied odds, decimal odds, fee breakdown, and updated pool projections. Essential for evaluating bet profitability.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        market: {
+          type: 'string',
+          description: 'Solana public key of the market',
+        },
+        side: {
+          type: 'string',
+          enum: ['Yes', 'No'],
+          description: 'Which outcome to bet on',
+        },
+        amount: {
+          type: 'number',
+          minimum: 0.01,
+          maximum: 100,
+          description: 'Bet amount in SOL (min: 0.01, max: 100)',
+        },
+      },
+      required: ['market', 'side', 'amount'],
+    },
+    annotations: {
+      title: 'Baozi: Get Bet Quote',
+      readOnlyHint: true,
+      idempotentHint: true,
+      openWorldHint: true,
+      destructiveHint: false,
+    },
+  },
+  {
+    name: 'baozi_get_positions',
+    title: 'Baozi: Get Wallet Positions',
+    description: 'Get all prediction market positions (bets) for a Solana wallet address on Baozi.bet. Returns both binary and race market positions with current market data, potential payouts, and whether each position is winning.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        wallet: {
+          type: 'string',
+          description: 'Solana wallet address (base58 public key)',
+        },
+      },
+      required: ['wallet'],
+    },
+    annotations: {
+      title: 'Baozi: Get Wallet Positions',
+      readOnlyHint: true,
+      idempotentHint: true,
+      openWorldHint: true,
+      destructiveHint: false,
+    },
+  },
+  {
+    name: 'baozi_get_market_metadata',
+    title: 'Baozi: Get Market Metadata',
+    description: 'Fetch off-chain metadata (description, rules, images, categories, tags, event times) for one or more Baozi.bet markets. Accepts comma-separated market IDs for batch lookups.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        marketIds: {
+          type: 'string',
+          description: 'Comma-separated Solana public keys of markets',
+        },
+      },
+      required: ['marketIds'],
+    },
+    annotations: {
+      title: 'Baozi: Get Market Metadata',
+      readOnlyHint: true,
+      idempotentHint: true,
+      openWorldHint: true,
+      destructiveHint: false,
+    },
+  },
+  {
+    name: 'baozi_get_agent_info',
+    title: 'Baozi: Agent Kitchen Info',
+    description: 'Get comprehensive information about the Baozi.bet agent ecosystem including registered agent count, recent activity, MCP server details, fee structure, market types, and step-by-step registration guide. This is the starting point for any AI agent wanting to participate in Baozi prediction markets.',
+    inputSchema: {
+      type: 'object',
+      properties: {},
+      required: [],
+    },
+    annotations: {
+      title: 'Baozi: Agent Kitchen Info',
+      readOnlyHint: true,
+      idempotentHint: true,
+      openWorldHint: true,
+      destructiveHint: false,
+    },
+  },
+  {
+    name: 'baozi_get_oracle_proofs',
+    title: 'Baozi: Oracle Resolution Proofs',
+    description: 'Retrieve oracle resolution proofs from the Baozi.bet "Grandma Mei" oracle system. Each proof includes the data source, evidence, and resolution rationale used to settle a prediction market. Supports filtering by market layer (official, labs, private).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        layer: {
+          type: 'string',
+          enum: ['official', 'labs', 'private', 'all'],
+          description: 'Filter proofs by market layer (default: all)',
+        },
+      },
+      required: [],
+    },
+    annotations: {
+      title: 'Baozi: Oracle Resolution Proofs',
+      readOnlyHint: true,
+      idempotentHint: true,
+      openWorldHint: true,
+      destructiveHint: false,
+    },
+  },
+  {
+    name: 'baozi_get_skill_docs',
+    title: 'Baozi: Protocol Documentation',
+    description: 'Get the complete Baozi.bet protocol documentation (SKILL.md) — the definitive reference for building on Baozi. Covers all 69 MCP tools, PDA seeds, account discriminators, fee structures, market types, oracle system, affiliate program, and integration guides.',
+    inputSchema: {
+      type: 'object',
+      properties: {},
+      required: [],
+    },
+    annotations: {
+      title: 'Baozi: Protocol Documentation',
+      readOnlyHint: true,
+      idempotentHint: true,
+      openWorldHint: true,
+      destructiveHint: false,
+    },
+  },
+  {
+    name: 'baozi_get_guardrails',
+    title: 'Baozi: Market Creation Rules',
+    description: 'Get the pari-mutuel guardrails (rules v7.2) that govern which prediction markets are allowed on Baozi.bet. Includes allowed market types (Type A: scheduled events, Type B: measurement periods), banned categories, timing requirements, and validation checklists. MUST READ before creating any market.',
+    inputSchema: {
+      type: 'object',
+      properties: {},
+      required: [],
+    },
+    annotations: {
+      title: 'Baozi: Market Creation Rules',
+      readOnlyHint: true,
+      idempotentHint: true,
+      openWorldHint: true,
+      destructiveHint: false,
+    },
+  },
+  {
+    name: 'baozi_get_program_idl',
+    title: 'Baozi: Program IDL',
+    description: 'Get the Anchor IDL (Interface Definition Language) for the Baozi prediction markets Solana program. Contains all instruction definitions, account schemas, PDA seeds, and type definitions needed for direct on-chain interaction via RPC.',
+    inputSchema: {
+      type: 'object',
+      properties: {},
+      required: [],
+    },
+    annotations: {
+      title: 'Baozi: Program IDL',
+      readOnlyHint: true,
+      idempotentHint: true,
+      openWorldHint: true,
+      destructiveHint: false,
+    },
+  },
+  {
+    name: 'baozi_get_share_card',
+    title: 'Baozi: Generate Share Card',
+    description: 'Generate a 1200x630 PNG share card image for a Baozi.bet prediction market. Shows market question, live YES/NO odds bar, pool size, and optional user position and affiliate branding. Perfect for social media sharing (Twitter/OG standard).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        market: {
+          type: 'string',
+          description: 'Solana public key of the market',
+        },
+        wallet: {
+          type: 'string',
+          description: 'Optional wallet address to show user\'s position on the card',
+        },
+        ref: {
+          type: 'string',
+          description: 'Optional affiliate referral code to display on the card',
+        },
+      },
+      required: ['market'],
+    },
+    annotations: {
+      title: 'Baozi: Generate Share Card',
+      readOnlyHint: true,
+      idempotentHint: true,
+      openWorldHint: true,
+      destructiveHint: false,
+    },
+  },
 ];
 
 // Handle list tools request
@@ -941,6 +1301,28 @@ server.setRequestHandler(ListPromptsRequestSchema, async () => {
           {
             name: 'event_ids',
             description: 'Comma-separated list of event tickers to compare',
+            required: true,
+          },
+        ],
+      },
+      {
+        name: 'baozi_market_analysis',
+        description: 'Analyze Baozi.bet Solana prediction markets — find the best opportunities by comparing odds, pool sizes, and closing times across active markets',
+        arguments: [
+          {
+            name: 'focus',
+            description: 'Focus area: "highest-volume", "best-odds", "closing-soon", or "new-markets" (default: highest-volume)',
+            required: false,
+          },
+        ],
+      },
+      {
+        name: 'cross_platform_comparison',
+        description: 'Compare prediction markets across DFlow/Kalshi (centralized, CFTC-regulated) and Baozi.bet (decentralized, Solana). Find the same events on both platforms and compare odds, fees, and liquidity.',
+        arguments: [
+          {
+            name: 'topic',
+            description: 'Topic to search across both platforms (e.g., "elections", "crypto", "sports")',
             required: true,
           },
         ],
@@ -984,6 +1366,36 @@ server.setRequestHandler(GetPromptRequestSchema, async (request) => {
     };
   }
 
+  if (name === 'baozi_market_analysis') {
+    const focus = args?.focus || 'highest-volume';
+    return {
+      messages: [
+        {
+          role: 'user',
+          content: {
+            type: 'text',
+            text: `Analyze Baozi.bet Solana prediction markets with focus on "${focus}". Use baozi_get_markets to fetch active markets, then for the most interesting ones use baozi_get_quote to evaluate potential bets. Provide a summary of the best opportunities including odds, pool sizes, and closing times. Baozi uses pari-mutuel pools where odds shift with each bet — analyze current pool distributions.`,
+          },
+        },
+      ],
+    };
+  }
+
+  if (name === 'cross_platform_comparison') {
+    const topic = args?.topic || 'current events';
+    return {
+      messages: [
+        {
+          role: 'user',
+          content: {
+            type: 'text',
+            text: `Compare prediction markets about "${topic}" across DFlow/Kalshi and Baozi.bet. Use search_events for DFlow and baozi_get_markets for Baozi. Compare: (1) Available markets on the same topics, (2) Odds/pricing differences, (3) Fee structures (Kalshi uses order book vs Baozi 2.5-3% pari-mutuel), (4) Liquidity/volume, (5) Settlement mechanism (centralized vs on-chain oracle). Highlight any arbitrage opportunities between CeFi and DeFi markets.`,
+          },
+        },
+      ],
+    };
+  }
+
   throw new McpError(ErrorCode.InvalidRequest, `Unknown prompt: ${name}`);
 });
 
@@ -1007,6 +1419,24 @@ server.setRequestHandler(ListResourcesRequestSchema, async () => {
         uri: 'dflow://api/docs',
         name: 'API Documentation',
         description: 'Complete API documentation and usage examples',
+        mimeType: 'text/markdown',
+      },
+      {
+        uri: 'baozi://markets',
+        name: 'Baozi Active Markets',
+        description: 'Currently active Solana prediction markets on Baozi.bet with live pari-mutuel odds',
+        mimeType: 'application/json',
+      },
+      {
+        uri: 'baozi://agents',
+        name: 'Baozi Agent Ecosystem',
+        description: 'Agent Kitchen info — registered agents, MCP tools, fees, and registration guide',
+        mimeType: 'application/json',
+      },
+      {
+        uri: 'baozi://docs',
+        name: 'Baozi Protocol Documentation',
+        description: 'Complete Baozi.bet protocol documentation covering all 69 MCP tools, PDA seeds, and integration guides',
         mimeType: 'text/markdown',
       },
     ],
@@ -1065,6 +1495,45 @@ For full documentation, visit: https://dflow.opensvm.com
           uri,
           mimeType: 'text/markdown',
           text: docs,
+        },
+      ],
+    };
+  }
+
+  if (uri === 'baozi://markets') {
+    const markets = await baoziClient.get('/api/v4/markets', { status: 'Active', limit: 20 });
+    return {
+      contents: [
+        {
+          uri,
+          mimeType: 'application/json',
+          text: JSON.stringify(markets, null, 2),
+        },
+      ],
+    };
+  }
+
+  if (uri === 'baozi://agents') {
+    const agents = await baoziClient.get('/api/v4/agents');
+    return {
+      contents: [
+        {
+          uri,
+          mimeType: 'application/json',
+          text: JSON.stringify(agents, null, 2),
+        },
+      ],
+    };
+  }
+
+  if (uri === 'baozi://docs') {
+    const docs = await baoziClient.get('/api/skill');
+    return {
+      contents: [
+        {
+          uri,
+          mimeType: 'text/markdown',
+          text: typeof docs === 'string' ? docs : docs.content || JSON.stringify(docs),
         },
       ],
     };
@@ -1194,6 +1663,82 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         result = await apiClient.get('/api/v1/search', toolArgs);
         break;
 
+      // ═══ Baozi.bet Solana Prediction Markets ═══
+
+      case 'baozi_get_markets':
+        result = await baoziClient.get('/api/v4/markets', {
+          status: toolArgs.status || 'Active',
+          limit: toolArgs.limit || 50,
+          offset: toolArgs.offset || 0,
+        });
+        break;
+
+      case 'baozi_get_market':
+        result = await baoziClient.get(`/api/v4/market/${toolArgs.publicKey}`);
+        break;
+
+      case 'baozi_get_agent_markets':
+        result = await baoziClient.get('/api/v4/agent/markets', {
+          status: toolArgs.status || 'Active',
+          betting_open: toolArgs.betting_open,
+          limit: toolArgs.limit || 50,
+        });
+        break;
+
+      case 'baozi_get_quote':
+        result = await baoziClient.get('/api/v4/quote', {
+          market: toolArgs.market,
+          side: toolArgs.side,
+          amount: toolArgs.amount,
+        });
+        break;
+
+      case 'baozi_get_positions':
+        result = await baoziClient.get(`/api/v4/positions/${toolArgs.wallet}`);
+        break;
+
+      case 'baozi_get_market_metadata':
+        result = await baoziClient.get('/api/markets/metadata', {
+          marketIds: toolArgs.marketIds,
+        });
+        break;
+
+      case 'baozi_get_agent_info':
+        result = await baoziClient.get('/api/v4/agents');
+        break;
+
+      case 'baozi_get_oracle_proofs':
+        result = await baoziClient.get('/api/agents/proofs', {
+          layer: toolArgs.layer || 'all',
+        });
+        break;
+
+      case 'baozi_get_skill_docs':
+        result = await baoziClient.get('/api/skill');
+        break;
+
+      case 'baozi_get_guardrails':
+        result = await baoziClient.get('/api/pari-mutuel-guardrails');
+        break;
+
+      case 'baozi_get_program_idl':
+        result = await baoziClient.get('/api/mcp/idl');
+        break;
+
+      case 'baozi_get_share_card': {
+        const cardParams: Record<string, any> = { market: toolArgs.market };
+        if (toolArgs.wallet) cardParams.wallet = toolArgs.wallet;
+        if (toolArgs.ref) cardParams.ref = toolArgs.ref;
+        const cardUrl = new URL('https://baozi.bet/api/share/card');
+        Object.entries(cardParams).forEach(([k, v]) => cardUrl.searchParams.set(k, v));
+        result = {
+          imageUrl: cardUrl.toString(),
+          format: 'PNG 1200x630',
+          description: 'Share card image URL — open in browser or embed in social media posts',
+        };
+        break;
+      }
+
       default:
         throw new McpError(ErrorCode.MethodNotFound, `Unknown tool: ${name}`);
     }
@@ -1225,7 +1770,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
 // Export for Smithery (stateless server factory)
 export default function({ config }: { config?: ServerConfig }) {
-  return createServer(config);
+  return createServer(config ? {
+    apiUrl: config.apiUrl,
+    baoziApiUrl: config.baoziApiUrl,
+    requestTimeout: config.requestTimeout,
+  } : undefined);
 }
 
 // Also run as STDIO server when executed directly

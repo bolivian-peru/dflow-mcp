@@ -1,7 +1,7 @@
 {
   "name": "@openSVM/dflow-mcp",
   "version": "1.0.0",
-  "description": "MCP Server for Prediction Market Metadata API - Access comprehensive prediction market data through 24 specialized tools",
+  "description": "MCP Server for Prediction Markets — 35 tools across DFlow/Kalshi (CeFi) and Baozi.bet (DeFi/Solana) for events, markets, trades, odds, oracle proofs, and cross-platform analysis",
   "type": "module",
   "module": "src/index.ts",
   "displayName": "DFlow MCP Server",
@@ -16,10 +16,16 @@
     "model-context-protocol",
     "prediction-markets",
     "dflow",
+    "baozi",
+    "kalshi",
+    "solana",
+    "defi",
+    "pari-mutuel",
     "api",
     "trading",
     "analytics",
-    "solana"
+    "oracle",
+    "ai-agents"
   ],
   "author": "openSVM",
   "license": "MIT",

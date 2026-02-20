@@ -4,7 +4,12 @@ This document helps agents work effectively with the DFlow MCP Server repository
 
 ## Project Overview
 
-This is a Model Context Protocol (MCP) server that provides access to the Prediction Market Metadata API defined in `llms_dflow.json`. The server implements a complete JSON-RPC interface with 23 tools covering events, markets, trades, forecasts, live data, and analytics.
+This is a Model Context Protocol (MCP) server providing access to prediction market data from two platforms:
+
+1. **DFlow/Kalshi** — CFTC-regulated centralized exchange (order book, USD settlement)
+2. **Baozi.bet** — Decentralized pari-mutuel markets on Solana (pool-based, SOL settlement)
+
+**35 total tools** across both platforms.
 
 ## Essential Commands
 
@@ -40,7 +45,7 @@ bun run test
 ```
 dflow-mcp/
 ├── src/
-│   └── index.ts              # Main MCP server implementation
+│   └── index.ts              # Main MCP server (DFlow + Baozi tools)
 ├── tests/
 │   └── server.test.ts        # TypeScript test suite
 ├── .github/workflows/
@@ -48,8 +53,8 @@ dflow-mcp/
 ├── package.json              # Dependencies and scripts
 ├── tsconfig.json             # TypeScript configuration
 ├── README.md                 # User documentation
-├── llms_dflow.json           # API specification (source of truth)
-├── AGENTS.md                 # This file (agent documentation)
+├── llms_dflow.json           # DFlow API specification
+├── AGENTS.md                 # This file
 └── test-server.sh            # Quick server validation script
 ```
 
@@ -57,27 +62,25 @@ dflow-mcp/
 
 ### Main Server (`src/index.ts`)
 
-- **DFlowAPIClient**: HTTP client for API communication with timeout handling
+- **DFlowAPIClient**: HTTP client for DFlow/Kalshi API (GET + POST, timeout handling)
+- **BaoziAPIClient**: HTTP client for Baozi.bet API (GET, handles JSON + markdown responses)
 - **Server Setup**: MCP server configuration and initialization
-- **Tool Definitions**: 23 MCP tools mapped from OpenAPI specification
+- **Tool Definitions**: 35 MCP tools (23 DFlow + 12 Baozi)
+- **Prompts**: 4 analysis prompts (market trends, event comparison, Baozi analysis, cross-platform)
+- **Resources**: 6 data resources (3 DFlow + 3 Baozi)
 - **Request Handling**: JSON-RPC request routing and response formatting
-
-### Key Components
-
-1. **API Client**: Handles HTTP requests to `https://api.llm.dflow.org`
-2. **Tool Registry**: Maps OpenAPI endpoints to MCP tools
-3. **Type Safety**: TypeScript interfaces for all request/response types
-4. **Error Handling**: Comprehensive error catching and MCP-formatted responses
 
 ## Tool Categories
 
-### Event Management (4 tools)
+### DFlow / Kalshi Tools (23)
+
+#### Event Management (4 tools)
 - `get_event` - Single event by ticker
 - `get_events` - Paginated event list with filtering
 - `search_events` - Search by title/ticker
 - `get_live_data_by_event` - Live data for event
 
-### Market Operations (6 tools)
+#### Market Operations (6 tools)
 - `get_market` - Market by ticker
 - `get_market_by_mint` - Market by mint address
 - `get_markets` - Paginated markets with filters
@@ -85,179 +88,103 @@ dflow-mcp/
 - `get_market_candlesticks` - OHLC data for market
 - `get_market_candlesticks_by_mint` - Candlesticks by mint
 
-### Trade & Analytics (4 tools)
+#### Trade & Analytics (4 tools)
 - `get_trades` - Trades across markets
 - `get_trades_by_mint` - Trades for specific market
 - `get_forecast_percentile_history` - Forecast analytics
 - `get_forecast_percentile_history_by_mint` - Forecast by mint
 
-### Live Data & Series (5 tools)
+#### Live Data & Series (5 tools)
 - `get_live_data` - Live data for milestones
 - `get_live_data_by_mint` - Live data by mint
 - `get_series` - All series templates
 - `get_series_by_ticker` - Series by ticker
 - `get_event_candlesticks` - Event candlesticks
 
-### Utilities (4 tools)
+#### Utilities (4 tools)
 - `get_outcome_mints` - Outcome mint addresses
 - `filter_outcome_mints` - Filter addresses to outcome mints
 - `get_tags_by_categories` - Category-tag mapping
 - `get_filters_by_sports` - Sports filtering options
 
+### Baozi.bet Solana Tools (12)
+
+#### Market Discovery (3 tools)
+- `baozi_get_markets` - List markets with status/limit/offset filtering
+- `baozi_get_market` - Single market by Solana public key
+- `baozi_get_agent_markets` - Agent-optimized list (filter by betting_open)
+
+#### Bet Analysis (1 tool)
+- `baozi_get_quote` - Calculate payout, odds, fees for a potential bet
+
+#### Portfolio (1 tool)
+- `baozi_get_positions` - All positions for a Solana wallet (binary + race)
+
+#### Metadata (1 tool)
+- `baozi_get_market_metadata` - Batch fetch descriptions, rules, images, categories
+
+#### Agent Ecosystem (1 tool)
+- `baozi_get_agent_info` - Registered agents, MCP details, fees, registration guide
+
+#### Oracle (1 tool)
+- `baozi_get_oracle_proofs` - Resolution proofs with evidence and rationale
+
+#### Documentation (3 tools)
+- `baozi_get_skill_docs` - Complete protocol docs (69 MCP tools reference)
+- `baozi_get_guardrails` - Pari-mutuel market creation rules v7.2
+- `baozi_get_program_idl` - Anchor IDL for direct on-chain RPC
+
+#### Social (1 tool)
+- `baozi_get_share_card` - Generate 1200x630 PNG share card URL
+
 ## API Reference
 
-### Base Configuration
-- **API URL**: `https://api.llm.dflow.org`
+### DFlow Configuration
+- **API URL**: `https://prediction-markets-api.dflow.net`
+- **Auth**: None required
 - **Timeout**: 30 seconds (configurable)
-- **Transport**: MCP stdio (JSON-RPC 2.0)
 
-### Request/Response Pattern
-- All tools accept JSON-RPC requests with validated input schemas
-- Responses are formatted as MCP text content with JSON strings
-- Errors return formatted error messages with context
+### Baozi Configuration
+- **API URL**: `https://baozi.bet`
+- **Auth**: None required for read operations
+- **Program**: `FWyTPzm5cfJwRKzfkscxozatSxF6Qu78JQovQUwKPruJ` (Solana mainnet)
+- **Full MCP**: `@baozi.bet/mcp-server` (69 tools, read+write, requires Solana wallet)
 
-### Authentication
-- Current API implementation does not require authentication
-- If auth is added later, configure in DFlowAPIClient headers
+### Baozi API Endpoints
+
+| Endpoint | Method | Returns |
+|----------|--------|---------|
+| `/api/v4/markets` | GET | Markets list (JSON) |
+| `/api/v4/market/:key` | GET | Single market (JSON) |
+| `/api/v4/agent/markets` | GET | Agent-optimized markets (JSON) |
+| `/api/v4/quote` | GET | Bet payout calculation (JSON) |
+| `/api/v4/positions/:wallet` | GET | Wallet positions (JSON) |
+| `/api/markets/metadata` | GET | Off-chain metadata batch (JSON) |
+| `/api/v4/agents` | GET | Agent ecosystem info (JSON) |
+| `/api/agents/proofs` | GET | Oracle resolution proofs (JSON) |
+| `/api/skill` | GET | Protocol documentation (markdown) |
+| `/api/pari-mutuel-guardrails` | GET | Market creation rules (markdown) |
+| `/api/mcp/idl` | GET | Program IDL (JSON) |
+| `/api/share/card` | GET | Share card image (PNG) |
 
 ## Development Patterns
 
 ### Adding New Tools
 
-1. **Define Tool Schema**: Add to TOOLS array in server setup
+1. **Define Tool Schema**: Add to TOOLS array with `baozi_` prefix for Baozi tools
 2. **Implement Handler**: Add case in main switch statement
-3. **Map API Endpoint**: Use DFlowAPIClient methods
+3. **Map API Endpoint**: Use `baoziClient.get()` for Baozi or `apiClient.get()` for DFlow
 4. **Validate Parameters**: MCP handles schema validation
 
-Example pattern:
-```typescript
-{
-  name: 'new_endpoint',
-  description: 'Description of the tool',
-  inputSchema: {
-    type: 'object',
-    properties: {
-      param1: { type: 'string', description: 'Param description' }
-    },
-    required: ['param1']
-  }
-}
-```
-
-### Error Handling
-
-- Use try-catch blocks for API calls
-- Format errors as MCP text content with `isError: true`
-- Include context about which tool failed
-- Preserve original error messages for debugging
-
-### Type Safety
-
-- All tool parameters should be typed in inputSchema
-- Use type guards for complex parameter validation
-- Maintain consistent naming between API and tools
-
-## Code Style Conventions
-
-### TypeScript
-- Use strict TypeScript settings (configured in tsconfig.json)
-- Import statements at top, grouped by type
-- Explicit return types for public functions
-- Use `const` by default, `let` only when necessary
-
-### Naming
-- **Tool names**: snake_case with descriptive names
-- **Parameters**: snake_case matching API specification
-- **Variables**: camelCase for local variables
-- **Functions**: camelCase with descriptive verbs
-
-### Documentation
-- Tool descriptions should explain purpose and expected response
-- Parameter descriptions should include units and constraints
-- Include examples for complex tools in README
-
-## Testing Approach
-
-### Manual Testing
-```bash
-# Quick validation
-./test-server.sh
-
-# Direct tool testing
-echo '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_events","arguments":{}}}' | bun run src/index.ts
-```
-
-### Integration Testing
-- Test MCP protocol compliance
-- Validate JSON schemas
-- Test error handling scenarios
-- Verify API endpoint mapping
-
-## Common Issues & Solutions
-
-### Server Not Responding
-- Check TypeScript compilation with `bun run tsc --noEmit`
-- Ensure all dependencies installed with `bun install`
-- Verify stdio transport is working (common in CI environments)
-
-### Tool Parameter Validation
-- MCP handles schema validation automatically
-- Missing required parameters return validation errors
-- Invalid types are caught before API calls
-
-### API Rate Limits
-- Current API doesn't have documented rate limits
-- Monitor response headers for rate limit information
-- Implement exponential backoff if needed
-
-## Deployment Considerations
-
-### Development
-- Use `bun run dev` for hot reloading during development
-- Server communicates via stdio, not HTTP server
-- Test with actual MCP client (Claude Desktop, Cursor)
-
-### Production
-- Build with `bun run build` for optimized bundle
-- Use `bun start` for production execution
-- Monitor server startup and connection handling
-
-### CI/CD
-- GitHub Actions workflow in `.github/workflows/test.yml`
-- Tests compilation and basic server functionality
-- Can add integration tests with mock API responses
-
-## API Specification Source
-
-The API specification in `llms_dflow.json` is the single source of truth:
-- OpenAPI 3.0 format
-- Complete with schemas, parameters, and responses
-- All tools derived from this specification
-- Update tools when API specification changes
-
-## Future Enhancements
-
-### Potential Additions
-- WebSocket support for real-time data
-- Caching layer for frequently accessed data
-- Pagination helpers for large datasets
-- Rate limiting and retry logic
-- Authentication token management
-
-### Scaling Considerations
-- Connection pooling for high-volume usage
-- Response compression for large payloads
-- Request deduplication for concurrent calls
-- Health check endpoints for monitoring
+### Naming Convention
+- DFlow tools: `get_*` (existing pattern)
+- Baozi tools: `baozi_*` prefix (platform-namespaced)
 
 ## Agent-Specific Tips
 
-When working with this repository:
-
 1. **Always test after changes**: Run `./test-server.sh` to validate
-2. **Check API specification**: Reference `llms_dflow.json` for endpoint details
+2. **Check API specification**: `llms_dflow.json` for DFlow, `baozi.bet/skill` for Baozi
 3. **Maintain type safety**: Use TypeScript strict mode
 4. **Follow MCP patterns**: Standard JSON-RPC 2.0 with stdio transport
 5. **Document new tools**: Update README.md and AGENTS.md when adding tools
-
-The server is designed to be a direct, type-safe wrapper around the Prediction Market API with comprehensive MCP protocol support.
+6. **Platform prefix**: All Baozi tools use `baozi_` prefix to avoid naming conflicts
